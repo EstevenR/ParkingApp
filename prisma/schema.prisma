@@ -88,6 +88,42 @@ enum VehicleType {
   BICYCLE
 }
 
+enum MembershipType {
+  HOURLY
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+enum MembershipStatus {
+  ACTIVE
+  EXPIRED
+  SUSPENDED
+  CANCELLED
+}
+
+enum SessionStatus {
+  IN_PROGRESS
+  COMPLETED
+  OVERDUE
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum PriceType {
+  PER_MINUTE
+  PER_HOUR
+  PER_DAY
+  FLAT_RATE
+}
+
 // ============================================
 // TENANT (Organization/Company)
 // ============================================
@@ -163,6 +199,9 @@ model User {
   bookings        Booking[]
   payments        Payment[]
   activityLogs    ActivityLog[]
+  memberships     Membership[]
+  parkingSessions ParkingSession[]
+  invoices        Invoice[]
 
   @@index([email])
   @@index([tenantId])
@@ -262,6 +301,10 @@ model ParkingLot {
   // Relations
   parkingSpots    ParkingSpot[]
   bookings        Booking[]
+  priceConfigs    PriceConfiguration[]
+  memberships     Membership[]
+  parkingSessions ParkingSession[]
+  invoices        Invoice[]
 
   @@index([tenantId])
   @@index([city])
@@ -300,6 +343,7 @@ model ParkingSpot {
 
   // Relations
   bookings        Booking[]
+  sessionsAssigned ParkingSession[] @relation("SessionSpots")
 
   @@unique([parkingLotId, spotNumber])
   @@index([parkingLotId])
@@ -329,6 +373,7 @@ model Vehicle {
 
   // Relations
   bookings        Booking[]
+  parkingSessions ParkingSession[]
 
   @@index([userId])
   @@index([licensePlate])
@@ -494,4 +539,225 @@ model ActivityLog {
   @@index([userId])
   @@index([action])
   @@index([createdAt])
+}
+
+// ============================================
+// PRICE CONFIGURATION (Flexible pricing)
+// ============================================
+
+model PriceConfiguration {
+  id              String      @id @default(cuid())
+  name            String      // e.g., "Weekend Rate", "Night Rate"
+
+  parkingLotId    String
+  parkingLot      ParkingLot  @relation(fields: [parkingLotId], references: [id], onDelete: Cascade)
+
+  priceType       PriceType   @default(PER_HOUR)
+
+  // Pricing
+  pricePerMinute  Int?        // in cents
+  pricePerHour    Int?        // in cents
+  pricePerDay     Int?        // in cents
+  flatRate        Int?        // in cents
+
+  // Time-based rules (optional)
+  startTime       String?     // Format: "08:00"
+  endTime         String?     // Format: "18:00"
+  daysOfWeek      Int[]       // 0=Sunday, 1=Monday, etc.
+
+  isActive        Boolean     @default(true)
+  priority        Int         @default(0) // Higher priority overrides
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([parkingLotId])
+  @@index([isActive])
+}
+
+// ============================================
+// MEMBERSHIP (Hora, Día, Semana, Mes)
+// ============================================
+
+model Membership {
+  id              String           @id @default(cuid())
+  membershipNumber String          @unique // e.g., "MEM-2024-001234"
+
+  userId          String
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  parkingLotId    String
+  parkingLot      ParkingLot       @relation(fields: [parkingLotId], references: [id], onDelete: Cascade)
+
+  type            MembershipType   // HOURLY, DAILY, WEEKLY, MONTHLY, YEARLY
+  status          MembershipStatus @default(ACTIVE)
+
+  // Validity period
+  startDate       DateTime
+  endDate         DateTime
+
+  // Pricing
+  price           Int              // in cents (total paid for membership)
+
+  // Benefits
+  unlimitedAccess Boolean          @default(true)
+  maxHoursPerDay  Int?             // NULL = unlimited
+  maxEntriesPerDay Int?            // NULL = unlimited
+
+  // Assigned vehicle (optional - can be for specific plate)
+  allowedVehicles String[]         // Array of license plates
+
+  // Payment
+  isPaid          Boolean          @default(false)
+  paidAt          DateTime?
+
+  // Auto-renewal
+  autoRenew       Boolean          @default(false)
+  renewalDate     DateTime?
+
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  // Relations
+  parkingSessions ParkingSession[]
+
+  @@index([userId])
+  @@index([parkingLotId])
+  @@index([status])
+  @@index([endDate])
+  @@index([membershipNumber])
+}
+
+// ============================================
+// PARKING SESSION (Control Entrada/Salida)
+// ============================================
+
+model ParkingSession {
+  id              String        @id @default(cuid())
+  sessionNumber   String        @unique // e.g., "SES-2024-001234"
+
+  // Vehicle identification
+  vehicleId       String
+  vehicle         Vehicle       @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  licensePlate    String        // Denormalized for quick lookup
+
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  parkingLotId    String
+  parkingLot      ParkingLot    @relation(fields: [parkingLotId], references: [id], onDelete: Cascade)
+
+  parkingSpotId   String?
+  parkingSpot     ParkingSpot?  @relation(fields: [parkingSpotId], references: [id], onDelete: SetNull)
+
+  // Membership (if applicable)
+  membershipId    String?
+  membership      Membership?   @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+
+  // Entry/Exit tracking
+  entryTime       DateTime      @default(now())
+  exitTime        DateTime?
+
+  // Duration in minutes (calculated on exit)
+  durationMinutes Int?
+
+  status          SessionStatus @default(IN_PROGRESS)
+
+  // Pricing applied
+  pricePerMinute  Int?          // in cents (snapshot at entry)
+  pricePerHour    Int?          // in cents (snapshot at entry)
+
+  // Total cost
+  totalCost       Int?          // in cents (calculated on exit)
+
+  // Payment tracking
+  isPaid          Boolean       @default(false)
+  paidAt          DateTime?
+  paymentMethod   PaymentMethod?
+
+  // Staff who processed entry/exit
+  entryStaffId    String?       // User ID of staff
+  exitStaffId     String?       // User ID of staff
+
+  // Notes
+  entryNotes      String?       @db.Text
+  exitNotes       String?       @db.Text
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  invoice         Invoice?
+  assignedSpots   ParkingSpot[] @relation("SessionSpots")
+
+  @@index([vehicleId])
+  @@index([userId])
+  @@index([parkingLotId])
+  @@index([licensePlate])
+  @@index([status])
+  @@index([entryTime])
+  @@index([exitTime])
+  @@index([sessionNumber])
+}
+
+// ============================================
+// INVOICE (Facturación detallada)
+// ============================================
+
+model Invoice {
+  id              String        @id @default(cuid())
+  invoiceNumber   String        @unique // e.g., "INV-2024-001234"
+
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  parkingLotId    String
+  parkingLot      ParkingLot    @relation(fields: [parkingLotId], references: [id], onDelete: Cascade)
+
+  // Related session
+  parkingSessionId String?      @unique
+  parkingSession   ParkingSession? @relation(fields: [parkingSessionId], references: [id], onDelete: SetNull)
+
+  // Invoice details
+  issueDate       DateTime      @default(now())
+  dueDate         DateTime      // When payment is due
+
+  // Line items (stored as JSON for flexibility)
+  lineItems       Json          // [{ description, quantity, unitPrice, total }]
+
+  // Amounts
+  subtotal        Int           // in cents
+  tax             Int           @default(0) // in cents
+  discount        Int           @default(0) // in cents
+  total           Int           // in cents
+
+  // Payment tracking
+  status          InvoiceStatus @default(ISSUED)
+  paidAmount      Int           @default(0) // in cents
+  balance         Int           // in cents (total - paidAmount)
+
+  paidAt          DateTime?
+  paymentMethod   PaymentMethod?
+
+  // Debt tracking
+  isOverdue       Boolean       @default(false)
+  overdueDate     DateTime?
+
+  // Late fees
+  lateFee         Int           @default(0) // in cents
+  lateFeeApplied  Boolean       @default(false)
+
+  // Notes
+  notes           String?       @db.Text
+  internalNotes   String?       @db.Text // Only visible to staff
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([userId])
+  @@index([parkingLotId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([isOverdue])
+  @@index([invoiceNumber])
 }

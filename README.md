@@ -1,17 +1,20 @@
 # 🚗 ParkingApp SaaS - Smart Parking Management
 
-A modern, production-ready SaaS application for parking lot management with real-time bookings, automated payments, and comprehensive analytics.
+A modern, production-ready SaaS application for parking lot management with real-time entry/exit control, memberships, automated invoicing, and comprehensive debt tracking.
 
 ## ✨ Features
 
 ### Core Functionality
 - 🏢 **Multi-tenant Architecture** - Supports multiple organizations with complete data isolation
-- 🚗 **Real-time Parking Management** - Live availability tracking and instant booking confirmations
-- 💳 **Integrated Payments** - Stripe integration for secure payment processing
+- 🚗 **Real-time Entry/Exit Control** - Track vehicles by license plate with precise timestamps
+- 💳 **Automated Invoicing** - Per-minute billing with automatic invoice generation
+- 🎫 **Membership System** - Hourly, daily, weekly, monthly, and yearly memberships
+- 💰 **Debt Management** - Complete tracking of who owes, how much, and when
+- ⚙️ **Flexible Pricing** - Configure different rates by time, day, or special conditions
 - 📱 **Progressive Web App (PWA)** - Works seamlessly on mobile and desktop devices
 - 🔐 **Advanced Authentication** - Secure authentication with NextAuth.js
 - 👥 **Role-Based Access Control** - Granular permissions for different user roles
-- 📊 **Analytics Dashboard** - Comprehensive insights and reporting
+- 📊 **Management Dashboard** - Real-time filtering by date, time, license plate, and more
 
 ### User Roles
 - **Super Admin** - Platform-wide management
@@ -48,13 +51,22 @@ A modern, production-ready SaaS application for parking lot management with real
 
 The application uses a comprehensive multi-tenant database schema with the following main entities:
 
+**Core Entities:**
 - **Tenant** - Organizations using the platform
 - **User** - System users with role-based permissions
 - **ParkingLot** - Physical parking locations
 - **ParkingSpot** - Individual parking spaces
-- **Vehicle** - User vehicles
-- **Booking** - Parking reservations
+- **Vehicle** - User vehicles with license plate tracking
+
+**Operations & Billing:**
+- **ParkingSession** - Real-time entry/exit tracking with duration calculation
+- **Membership** - Time-based memberships (hourly to yearly)
+- **Invoice** - Detailed invoicing with line items, taxes, and debt tracking
 - **Payment** - Payment transactions
+- **PriceConfiguration** - Flexible pricing rules (per minute, hour, day, time-based)
+
+**System:**
+- **Booking** - Advanced reservations
 - **Subscription** - Tenant billing and subscriptions
 - **ActivityLog** - Audit trail for security and compliance
 
@@ -193,17 +205,31 @@ The application is a fully functional PWA that provides:
 
 ## 🎯 Roadmap
 
+**✅ Completado:**
 - [x] Multi-tenant architecture
 - [x] User authentication and authorization
-- [x] Database schema design
+- [x] Database schema design (18 models, 7 enums)
 - [x] Basic UI components
 - [x] PWA configuration
 - [x] Docker setup
-- [ ] Complete booking flow
-- [ ] Stripe payment integration
+- [x] Entry/Exit control system
+- [x] Membership system (hourly to yearly)
+- [x] Flexible pricing configuration
+- [x] Automatic invoicing per minute
+- [x] Debt tracking and management
+- [x] Admin dashboard with filters
+- [x] Payment tracking
+- [x] Complete booking flow
+
+**🚧 Próximamente:**
+- [ ] Stripe payment integration (backend ready)
 - [ ] Email notifications
+- [ ] SMS notifications
+- [ ] Map integration for parking lot search
+- [ ] QR codes for entry/exit
 - [ ] Mobile app (React Native)
-- [ ] Advanced analytics
+- [ ] Advanced analytics and charts
+- [ ] Export reports (PDF, Excel)
 - [ ] API documentation (Swagger)
 - [ ] Unit and integration tests
 - [ ] CI/CD pipeline
