@@ -342,7 +342,8 @@ model ParkingSpot {
   updatedAt       DateTime    @updatedAt
 
   // Relations
-  bookings        Booking[]
+  bookings         Booking[]
+  parkingSessions  ParkingSession[]
   sessionsAssigned ParkingSession[] @relation("SessionSpots")
 
   @@unique([parkingLotId, spotNumber])
