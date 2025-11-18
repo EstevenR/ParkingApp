@@ -1,0 +1,497 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// MULTI-TENANT ARCHITECTURE
+// ============================================
+
+enum UserRole {
+  SUPER_ADMIN    // Platform administrator
+  TENANT_ADMIN   // Organization/Company owner
+  MANAGER        // Parking lot manager
+  STAFF          // Parking attendant
+  USER           // Regular user/customer
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  TRIAL
+  CANCELLED
+}
+
+enum SubscriptionPlan {
+  FREE
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CREDIT_CARD
+  DEBIT_CARD
+  CASH
+  BANK_TRANSFER
+  PAYPAL
+  STRIPE
+}
+
+enum SpotStatus {
+  AVAILABLE
+  OCCUPIED
+  RESERVED
+  MAINTENANCE
+  DISABLED
+}
+
+enum SpotType {
+  STANDARD
+  COMPACT
+  ELECTRIC
+  HANDICAPPED
+  MOTORCYCLE
+  OVERSIZED
+}
+
+enum VehicleType {
+  CAR
+  MOTORCYCLE
+  TRUCK
+  VAN
+  SUV
+  ELECTRIC
+  BICYCLE
+}
+
+// ============================================
+// TENANT (Organization/Company)
+// ============================================
+
+model Tenant {
+  id              String           @id @default(cuid())
+  name            String
+  slug            String           @unique // URL-friendly identifier
+  email           String
+  phone           String?
+  address         String?
+  logo            String?
+  website         String?
+
+  // Subscription
+  plan            SubscriptionPlan @default(FREE)
+  status          TenantStatus     @default(TRIAL)
+  trialEndsAt     DateTime?
+  subscriptionEndsAt DateTime?
+
+  // Limits based on plan
+  maxParkingLots  Int              @default(1)
+  maxSpots        Int              @default(10)
+  maxUsers        Int              @default(3)
+
+  // Billing
+  stripeCustomerId String?         @unique
+
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  // Relations
+  users           User[]
+  parkingLots     ParkingLot[]
+  bookings        Booking[]
+  payments        Payment[]
+  subscriptions   Subscription[]
+
+  @@index([slug])
+  @@index([status])
+}
+
+// ============================================
+// USER
+// ============================================
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  emailVerified   DateTime?
+  password        String    // Hashed with bcrypt
+  name            String?
+  phone           String?
+  avatar          String?
+
+  // Multi-tenant
+  tenantId        String?
+  tenant          Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  role            UserRole  @default(USER)
+
+  // User preferences
+  defaultVehicleId String?
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  lastLoginAt     DateTime?
+
+  // Relations
+  accounts        Account[]
+  sessions        Session[]
+  vehicles        Vehicle[]
+  bookings        Booking[]
+  payments        Payment[]
+  activityLogs    ActivityLog[]
+
+  @@index([email])
+  @@index([tenantId])
+  @@index([role])
+}
+
+// ============================================
+// AUTHENTICATION (NextAuth.js)
+// ============================================
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ============================================
+// PARKING LOT
+// ============================================
+
+model ParkingLot {
+  id              String      @id @default(cuid())
+  name            String
+  description     String?     @db.Text
+
+  // Location
+  address         String
+  city            String
+  state           String
+  country         String
+  zipCode         String?
+  latitude        Float?
+  longitude       Float?
+
+  // Multi-tenant
+  tenantId        String
+  tenant          Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Operating hours
+  opensAt         String?     // Format: "08:00"
+  closesAt        String?     // Format: "22:00"
+  is24Hours       Boolean     @default(false)
+
+  // Capacity
+  totalSpots      Int
+  availableSpots  Int
+
+  // Pricing (per hour in cents)
+  basePrice       Int         @default(500) // $5.00
+
+  // Features
+  hasSecurity     Boolean     @default(false)
+  hasCCTV         Boolean     @default(false)
+  hasCoveredParking Boolean   @default(false)
+  hasEvCharging   Boolean     @default(false)
+  hasWifi         Boolean     @default(false)
+
+  status          String      @default("active") // active, inactive, maintenance
+
+  images          String[]    // Array of image URLs
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Relations
+  parkingSpots    ParkingSpot[]
+  bookings        Booking[]
+
+  @@index([tenantId])
+  @@index([city])
+  @@index([status])
+}
+
+// ============================================
+// PARKING SPOT
+// ============================================
+
+model ParkingSpot {
+  id              String      @id @default(cuid())
+  spotNumber      String      // e.g., "A-101", "B-25"
+  floor           String?     // e.g., "1", "2", "B1" (basement)
+  section         String?     // e.g., "A", "B", "North"
+
+  parkingLotId    String
+  parkingLot      ParkingLot  @relation(fields: [parkingLotId], references: [id], onDelete: Cascade)
+
+  type            SpotType    @default(STANDARD)
+  status          SpotStatus  @default(AVAILABLE)
+
+  // Pricing override (if different from lot base price)
+  pricePerHour    Int?        // in cents
+
+  // Dimensions
+  width           Float?      // in meters
+  length          Float?      // in meters
+
+  // Features
+  hasEvCharger    Boolean     @default(false)
+  isCovered       Boolean     @default(false)
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Relations
+  bookings        Booking[]
+
+  @@unique([parkingLotId, spotNumber])
+  @@index([parkingLotId])
+  @@index([status])
+}
+
+// ============================================
+// VEHICLE
+// ============================================
+
+model Vehicle {
+  id              String      @id @default(cuid())
+  licensePlate    String
+  make            String?     // e.g., "Toyota"
+  model           String?     // e.g., "Camry"
+  color           String?
+  year            Int?
+  type            VehicleType @default(CAR)
+
+  userId          String
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  isDefault       Boolean     @default(false)
+
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  // Relations
+  bookings        Booking[]
+
+  @@index([userId])
+  @@index([licensePlate])
+}
+
+// ============================================
+// BOOKING
+// ============================================
+
+model Booking {
+  id              String        @id @default(cuid())
+  bookingNumber   String        @unique // e.g., "BK-2024-001234"
+
+  // Multi-tenant
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  parkingLotId    String
+  parkingLot      ParkingLot    @relation(fields: [parkingLotId], references: [id], onDelete: Cascade)
+
+  parkingSpotId   String?
+  parkingSpot     ParkingSpot?  @relation(fields: [parkingSpotId], references: [id], onDelete: SetNull)
+
+  vehicleId       String
+  vehicle         Vehicle       @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  // Timing
+  startTime       DateTime
+  endTime         DateTime
+  actualStartTime DateTime?
+  actualEndTime   DateTime?
+
+  // Pricing
+  pricePerHour    Int           // in cents (saved at booking time)
+  estimatedCost   Int           // in cents
+  actualCost      Int?          // in cents (calculated after checkout)
+
+  status          BookingStatus @default(PENDING)
+
+  // Notes
+  notes           String?       @db.Text
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  payment         Payment?
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([parkingLotId])
+  @@index([status])
+  @@index([startTime])
+  @@index([bookingNumber])
+}
+
+// ============================================
+// PAYMENT
+// ============================================
+
+model Payment {
+  id              String        @id @default(cuid())
+  paymentNumber   String        @unique // e.g., "PAY-2024-001234"
+
+  // Multi-tenant
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  userId          String
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  bookingId       String        @unique
+  booking         Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  amount          Int           // in cents
+  currency        String        @default("USD")
+
+  method          PaymentMethod
+  status          PaymentStatus @default(PENDING)
+
+  // External payment provider
+  stripePaymentId String?
+  stripeInvoiceId String?
+
+  // Card details (last 4 digits only)
+  cardLast4       String?
+  cardBrand       String?
+
+  paidAt          DateTime?
+  refundedAt      DateTime?
+  refundAmount    Int?          // in cents
+
+  // Metadata
+  metadata        Json?
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([status])
+  @@index([paymentNumber])
+}
+
+// ============================================
+// SUBSCRIPTION (for tenant billing)
+// ============================================
+
+model Subscription {
+  id                    String           @id @default(cuid())
+
+  tenantId              String
+  tenant                Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  plan                  SubscriptionPlan
+  status                String           // active, cancelled, past_due
+
+  currentPeriodStart    DateTime
+  currentPeriodEnd      DateTime
+  cancelAtPeriodEnd     Boolean          @default(false)
+
+  // Stripe
+  stripeSubscriptionId  String?          @unique
+  stripePriceId         String?
+
+  // Pricing
+  amount                Int              // in cents
+  currency              String           @default("USD")
+  interval              String           // month, year
+
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  cancelledAt           DateTime?
+
+  @@index([tenantId])
+  @@index([status])
+}
+
+// ============================================
+// ACTIVITY LOG (Audit trail)
+// ============================================
+
+model ActivityLog {
+  id          String   @id @default(cuid())
+
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  action      String   // e.g., "booking.created", "user.login"
+  entity      String?  // e.g., "Booking", "Payment"
+  entityId    String?
+
+  ipAddress   String?
+  userAgent   String?
+
+  metadata    Json?    // Additional context
+
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
